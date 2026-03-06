@@ -1,12 +1,20 @@
 
 # RFC: Web Mail Transport Protocol (WMTP)
 
-**Version:** 1.1
-**Date:** 2026-03-06
+**Version:** 1.2
+**Date:** 2026-03-07
 
 ---
 
 ## Changelog
+
+#### Version 1.2 — 2026-03-07
+
+- Clarified that plain WMTP addresses in JSON bodies are transmitted without base64url encoding; only URL query parameters require encoding (Section 4, Section 6.2, Section 6.3)
+- Updated all examples to use `alice@www.example.org` as sender and `charlie@www.example.com` as recipient
+- Fixed deliver URL to use the Sender Server's address (`www.example.org`) (Section 6.3)
+- Added well-known metadata keys `reply`, `thread`, and `format` (Section 5.4)
+- Added HTTP Redirect policy: one hop, same registered domain, HTTPS only (Section 7.8)
 
 #### Version 1.1 — 2026-03-06
 
@@ -134,14 +142,14 @@ The seven-day retry window aligns with the deduplication log described in sectio
 
 ## 4. Encoding
 
-All string fields transmitted in query parameters and JSON bodies are encoded using **base64url** as defined in RFC 4648 §5: the URL-safe alphabet (`A`–`Z`, `a`–`z`, `0`–`9`, `-`, `_`) with padding characters (`=`) omitted.
+WMTP uses **base64url** (RFC 4648 §5) to encode values that contain binary data or characters that are unsafe in URLs. The base64url alphabet uses `A`–`Z`, `a`–`z`, `0`–`9`, `-`, `_`, with padding characters (`=`) omitted.
 
 - **Encode:** standard base64 with URL-safe alphabet, omitting trailing `=` padding.
 - **Decode:** standard base64url decode; implementations must reject any input containing `+`, `/`, or `=`.
 
-**Example:** `foo@example.com` → `Zm9vQGV4YW1wbGUuY29t`
+**Example:** `charlie@www.example.com` (recipient address in a URL query parameter) → `Y2hhcmxpZUB3d3cuZXhhbXBsZS5jb20`
 
-Standard library support exists in every major language and runtime.
+Plain ASCII strings such as UUIDs and WMTP addresses in JSON bodies are transmitted without encoding. This specification identifies which fields require base64url encoding in each endpoint.
 
 ---
 
@@ -173,7 +181,7 @@ Content-Type: image/jpeg
 |---|---|---|
 | `messageId` | yes | UUIDv6 string generated before the first delivery attempt; unchanged across all retries |
 | `messageDate` | yes | ISO 8601 date and time set by the Sender Server when it accepts the message from the local client |
-| `recipient` | yes | Full WMTP address of the recipient (e.g. `bob@example.com`) |
+| `recipient` | yes | Full WMTP address of the recipient (e.g. `charlie@www.example.com`) |
 | `from` | yes | Full WMTP address of the sender |
 | `to` | yes | Primary recipient addresses |
 | `cc` | no | Carbon-copy addresses |
@@ -191,6 +199,18 @@ The client calling `?action=send` generates the `messageId` (UUIDv6) before subm
 WMTP uses UUID version 6 (UUIDv6) as defined in RFC 9562. UUIDv6 reorders the time bits of UUIDv1 for lexicographic sortability without exposing the host MAC address. Identifiers appear in standard lowercase canonical form: `xxxxxxxx-xxxx-6xxx-yxxx-xxxxxxxxxxxx`.
 
 UUIDv7 is an acceptable alternative where UUIDv6 is unavailable.
+
+### 5.4 Well-known metadata keys
+
+The `metadata` field is a free-form key-value map. The following keys are defined by this specification; implementations that support threading should honour them.
+
+| Key | Value | Description |
+|---|---|---|
+| `reply` | UUIDv6 string | `messageId` of the message this message is a direct reply to |
+| `thread` | UUIDv6 string | `messageId` of the root message of the thread |
+| `format` | `text/plain` or `text/html` | Content type of the `content` field. Defaults to `text/plain` if absent |
+
+**Threading semantics:** to reply to a message, the client sets `reply` to the parent's `messageId`. It also sets `thread`: if the parent carries a `thread` key, the client copies that value; otherwise it sets `thread` to the same value as `reply`. This lets clients group messages by thread even when intermediate messages are absent.
 
 ---
 
@@ -229,24 +249,24 @@ Returns the protocol version and, when requested by a local client, the supporte
 
 ### 6.2 `POST ?action=incoming`
 
-Notifies the Recipient Server that a message is ready for delivery. All string fields in the JSON body are encoded with base64url (section 4).
+Notifies the Recipient Server that a message is ready for delivery.
 
 **Request body (JSON):**
 
 | Field | Type | Description |
 |---|---|---|
-| `from` | string | Base64url-encoded sender address |
-| `recipient` | string | Base64url-encoded recipient address |
-| `messageId` | string | Base64url-encoded message identifier |
+| `from` | string | Sender address |
+| `recipient` | string | Recipient address |
+| `messageId` | string | Message identifier |
 | `secret` | string | Base64url-encoded per-recipient secret (used to authenticate the subsequent deliver request) |
 
 **Example request body:**
 
 ```json
 {
-  "from": "Zm9vQGV4YW1wbGUub3Jn",
-  "recipient": "YmFyQHd3dy5leGFtcGxlLmNvbQ",
-  "messageId": "MTIzNDU2NzgtMTIzNC02eHh4LXl4eHgteHh4eHh4eHh4eHh4",
+  "from": "alice@www.example.org",
+  "recipient": "charlie@www.example.com",
+  "messageId": "1ef5b3e2-1234-6abc-9def-abcdef012345",
   "secret": "YWJjZGVmZ2hpamtsbW5vcA"
 }
 ```
@@ -266,20 +286,22 @@ Notifies the Recipient Server that a message is ready for delivery. All string f
 
 ### 6.3 `GET ?action=deliver&messageId=…&secret=…&recipient=…`
 
-Requests the message from the Sender Server. The Recipient Server calls this endpoint after accepting an `incoming` notification. All query parameter values are encoded with base64url (section 4).
+Requests the message from the Sender Server. The Recipient Server calls this endpoint after accepting an `incoming` notification.
 
 **Query parameters:**
 
 | Parameter | Description |
 |---|---|
-| `messageId` | Base64url-encoded message identifier (as provided in the `incoming` notification) |
+| `messageId` | Message identifier (as provided in the `incoming` notification) |
 | `secret` | Base64url-encoded per-recipient secret (as provided in the `incoming` notification) |
 | `recipient` | Base64url-encoded recipient address (as provided in the `incoming` notification) |
+
+`messageId` is a UUID and contains only URL-safe characters; no encoding is required. `recipient` may contain `@` and `/` and must be base64url-encoded. `secret` contains arbitrary bytes and must be base64url-encoded.
 
 **Example request:**
 
 ```
-GET https://example.org/wmtp/?action=deliver&messageId=MTIzNDU2NzgtMTIzNC02eHh4LXl4eHgteHh4eHh4eHh4eHh4&secret=YWJjZGVmZ2hpamtsbW5vcA&recipient=YmFyQHd3dy5leGFtcGxlLmNvbQ
+GET https://www.example.org/wmtp/?action=deliver&messageId=1ef5b3e2-1234-6abc-9def-abcdef012345&secret=YWJjZGVmZ2hpamtsbW5vcA&recipient=Y2hhcmxpZUB3d3cuZXhhbXBsZS5jb20
 ```
 
 **Response:**
@@ -430,6 +452,16 @@ The protocol cannot fully solve this problem, but defines the following baseline
 - A Sender Server that receives a `429` response must not retry before the time indicated in the `Retry-After` header. If the header is absent, the server must apply its standard retry policy (see section 3.1) and must not retry immediately.
 
 More sophisticated countermeasures — shared blocklists, sender reputation systems, domain-level filtering — are outside the scope of this version and may be addressed in future extensions.
+
+### 7.8 HTTP Redirects
+
+When a WMTP request receives an HTTP redirect (`301`, `302`, `307`, or `308`), the client may follow it. The following constraints apply:
+
+- **One hop only.** The client must not follow a redirect that itself redirects.
+- **Same registered domain.** The target must share the registered domain (eTLD+1) with the original URL. `mail.example.org` is a valid target for `example.org`; `otherdomain.com` is not.
+- **HTTPS only.** The target must use HTTPS.
+
+A redirect that violates any of these constraints is a delivery failure.
 
 ---
 
