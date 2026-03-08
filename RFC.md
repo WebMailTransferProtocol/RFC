@@ -124,21 +124,21 @@ Plain ASCII strings such as UUIDs and WMTP addresses in JSON bodies are transmit
 
 ## 5. Message Format
 
-Messages are transmitted as `multipart/form-data` bodies. Each message consists of:
+Messages are transmitted as `multipart/mixed` bodies. Each message consists of:
 
 1. A required `data` part (`Content-Type: application/json`) containing the message fields as a JSON object.
 2. Zero or more `attachment` parts, each carrying one binary file. Attachment parts follow the `data` part in message order.
 
 ### 5.1 Attachment parts
 
-Each attachment is a separate part named `attachment`. The `filename` attribute in the `Content-Disposition` header carries the file name. The `Content-Type` header identifies the file type.
+Each attachment is a separate part with `Content-Disposition: attachment`. The `filename` parameter carries the file name. The `Content-Type` header identifies the file type.
 
 Attachment filenames must be unique within a message: duplicates must be rejected with `400 Bad Request`.
 
 **Example attachment part:**
 
 ```
-Content-Disposition: form-data; name="attachment"; filename="photo.jpg"
+Content-Disposition: attachment; filename="photo.jpg"
 Content-Type: image/jpeg
 
 [binary file content]
@@ -195,6 +195,7 @@ Returns the protocol version and, when requested by a local client, the supporte
 
 ```json
 {
+  "messageBodyFormats": ["multipart/mixed"],
   "messageSizeLimit": 10485760,
   "protocol": "1.0"
 }
@@ -206,12 +207,15 @@ Returns the protocol version and, when requested by a local client, the supporte
 {
   "authentication": ["token"],
   "hashing": ["sha3-256", "sha-512"],
+  "messageBodyFormats": ["multipart/mixed"],
   "messageSizeLimit": 10485760,
   "protocol": "1.0"
 }
 ```
 
 The optional `messageSizeLimit` field indicates the maximum request body size in bytes the server accepts; senders and clients must check this value before submitting a message and treat any message exceeding it as permanently undeliverable without attempting submission.
+
+The `messageBodyFormats` field lists the message body formats the server can handle. The Sender Server must pick a format present in both its own capabilities and the Recipient Server's `messageBodyFormats` list before calling `?action=deliver`; if the intersection is empty, the message must be treated as permanently undeliverable. Clients must likewise pick a format from the `messageBodyFormats` list returned by `?action=version&type=send` before calling `?action=send`. The only format defined by this version of the specification is `multipart/mixed` (Section 5).
 
 Modern implementations should support `sha3-256` or stronger; `sha-512` is an acceptable alternative for legacy environments where SHA-3 is unavailable.
 
@@ -282,10 +286,10 @@ GET https://www.example.org/wmtp/?action=deliver&messageId=1ef5b3e2-1234-6abc-9d
 
 **Response:**
 
-On success, the response body is a `multipart/form-data` message as described in section 5. The `data` JSON part contains all message fields except `bcc`. Attachment parts follow.
+On success, the response body is a `multipart/mixed` message as described in section 5. The `data` JSON part contains all message fields except `bcc`. Attachment parts follow.
 
 ```
-Content-Type: multipart/form-data; boundary=<boundary>
+Content-Type: multipart/mixed; boundary=<boundary>
 ```
 
 **Response codes:**
@@ -301,7 +305,7 @@ Content-Type: multipart/form-data; boundary=<boundary>
 
 ### 6.4 `POST ?action=send`
 
-Accepts an outgoing message from a local client and stores it in the outgoing queue for delivery. The request body is `multipart/form-data` as described in section 5.
+Accepts an outgoing message from a local client and stores it in the outgoing queue for delivery. The request body is `multipart/mixed` as described in section 5.
 
 The `data` JSON part must include an `authentication` object (see section 7.5). The `messageDate` field is set by the server on receipt and must not be included by the client. All other string fields are plain UTF-8.
 
@@ -450,6 +454,8 @@ Stefano Balocco
 
 #### Version 1.3 — 2026-03-08
 
+- Replaced `multipart/form-data` with `multipart/mixed` as the message body format (Section 5, Section 6.3, Section 6.4)
+- Added `messageBodyFormats` field to the `?action=version` response (`type=receive` and `type=send`); servers advertise supported formats and senders/clients must pick a mutually supported format before submitting (Section 6.1)
 - Removed password authentication; token is now the only supported method (Section 7.5)
 - Added algorithm negotiation: the server advertises supported hashing algorithms via the `hashing` field in `?action=version&type=send` (Section 6.1, Section 7.5)
 - Added `hash` field to the `authentication` object; recommended algorithms are `sha3-256` and `sha-512` (Section 7.5)
