@@ -1,39 +1,8 @@
 
 # RFC: Web Mail Transport Protocol (WMTP)
 
-**Version:** 1.2
-**Date:** 2026-03-07
-
----
-
-## Changelog
-
-#### Version 1.2 — 2026-03-07
-
-- Clarified that plain WMTP addresses in JSON bodies are transmitted without base64url encoding; only URL query parameters require encoding (Section 4, Section 6.2, Section 6.3)
-- Updated all examples to use `alice@www.example.org` as sender and `charlie@www.example.com` as recipient
-- Fixed deliver URL to use the Sender Server's address (`www.example.org`) (Section 6.3)
-- Added well-known metadata keys `reply`, `thread`, and `format` (Section 5.4)
-- Added HTTP Redirect policy: one hop, same registered domain, HTTPS only (Section 7.8)
-
-#### Version 1.1 — 2026-03-06
-
-- Replaced custom encodings with base64url (Section 4)
-- Replaced Protocol Buffers with multipart/form-data (Section 5)
-- Fixed BCC field semantics (Section 5.2)
-- Added attachment filename uniqueness constraint (Section 5.1)
-- Added Retry Policy (Section 3.1)
-- Added Client Authentication with `password` and `token` methods (Section 7.5)
-- Updated HMAC signing to cover attachments in canonical form (Section 7.5)
-- Added TLS certificate validation requirement (Section 7.1)
-- Added Message Size Limits (Section 7.6)
-- Added Rate Limiting and Spam guidance (Section 7.7)
-- Added `type` parameter to `?action=version` to distinguish server-to-server and client-to-server contexts (Section 6.1)
-- Removed implementation-specific deployment section
-
-#### Version 1.0 — 2026-02-01
-
-Initial draft.
+**Version:** 1.3
+**Date:** 2026-03-08
 
 ---
 
@@ -51,7 +20,7 @@ The Web Mail Transport Protocol (WMTP) defines how two HTTP servers exchange ema
 
 A single server may act as both Sender and Recipient.
 
-**WMTP endpoint:** a single script (e.g. `index.php`) installed under a `wmtp/` directory. All protocol actions reach this endpoint via query parameters.
+**WMTP endpoint:** a single script (e.g. `index.php`) installed under a `wmtp/` directory; all protocol actions reach it via query parameters.
 
 ---
 
@@ -86,7 +55,7 @@ The `localpart` (username) must satisfy the following rules:
 
 - **Allowed characters:** ASCII letters (`a`–`z`, `A`–`Z`), digits (`0`–`9`), hyphen (`-`), underscore (`_`).
 - **First and last character:** must be a letter or digit. A single-character username is valid.
-- **Case:** case insensitive. Implementations must normalize usernames to lowercase on storage and comparison.
+- **Case:** case insensitive; implementations must normalize usernames to lowercase on storage and comparison.
 
 Formal grammar:
 
@@ -102,7 +71,7 @@ inner-char   = name-char / "-" / "_"
 
 ### 2.3 Reserved characters
 
-The characters `+`, `/`, `\`, `=`, `|` are reserved and must not appear in usernames. Reserved for potential future use (e.g. `+` for subaddressing).
+The characters `+`, `/`, `\`, `=`, `|` are reserved for potential future use (e.g. `+` for subaddressing) and must not appear in usernames.
 
 ---
 
@@ -164,7 +133,7 @@ Messages are transmitted as `multipart/form-data` bodies. Each message consists 
 
 Each attachment is a separate part named `attachment`. The `filename` attribute in the `Content-Disposition` header carries the file name. The `Content-Type` header identifies the file type.
 
-Attachment filenames must be unique within a message. A message containing two or more attachments with the same filename must be rejected with `400 Bad Request`.
+Attachment filenames must be unique within a message: duplicates must be rejected with `400 Bad Request`.
 
 **Example attachment part:**
 
@@ -196,7 +165,7 @@ Content-Type: image/jpeg
 
 The client calling `?action=send` generates the `messageId` (UUIDv6) before submitting the message. Client-side generation enables idempotent retries: if the call fails before the server responds, the client retries with the same `messageId`; the server detects and discards the duplicate (see sections 6.4 and 7.4).
 
-WMTP uses UUID version 6 (UUIDv6) as defined in RFC 9562. UUIDv6 reorders the time bits of UUIDv1 for lexicographic sortability without exposing the host MAC address. Identifiers appear in standard lowercase canonical form: `xxxxxxxx-xxxx-6xxx-yxxx-xxxxxxxxxxxx`.
+WMTP uses UUID version 6 (UUIDv6, RFC 9562), which reorders the time bits of UUIDv1 for lexicographic sortability without exposing the host MAC address. Identifiers appear in standard lowercase canonical form: `xxxxxxxx-xxxx-6xxx-yxxx-xxxxxxxxxxxx`.
 
 UUIDv7 is an acceptable alternative where UUIDv6 is unavailable.
 
@@ -220,12 +189,13 @@ All endpoints live at the same URL (the WMTP endpoint). The action is selected v
 
 ### 6.1 `GET ?action=version`
 
-Returns the protocol version and, when requested by a local client, the supported authentication methods. The optional `type` query parameter specifies the context: `receive` (default) for server-to-server delivery, `send` for local client submission.
+Returns the protocol version and, when requested by a local client, the supported authentication methods and hashing algorithms. The optional `type` query parameter specifies the context: `receive` (default) for server-to-server delivery, `send` for local client submission.
 
 **Response body (JSON) — `type=receive` (default):**
 
 ```json
 {
+  "messageSizeLimit": 10485760,
   "protocol": "1.0"
 }
 ```
@@ -234,10 +204,16 @@ Returns the protocol version and, when requested by a local client, the supporte
 
 ```json
 {
-  "authentication": ["password", "token"],
+  "authentication": ["token"],
+  "hashing": ["sha3-256", "sha-512"],
+  "messageSizeLimit": 10485760,
   "protocol": "1.0"
 }
 ```
+
+The optional `messageSizeLimit` field indicates the maximum request body size in bytes the server accepts; senders and clients must check this value before submitting a message and treat any message exceeding it as permanently undeliverable without attempting submission.
+
+Modern implementations should support `sha3-256` or stronger; `sha-512` is an acceptable alternative for legacy environments where SHA-3 is unavailable.
 
 **Response codes:**
 
@@ -364,7 +340,7 @@ Binary attachments are submitted as separate `attachment` parts following the `d
 
 ### 7.1 Transport
 
-All WMTP traffic must use HTTPS. Implementations must validate the remote server's TLS certificate against a trusted certificate authority and must reject connections with invalid, expired, or self-signed certificates. Disabling certificate validation is not permitted.
+All WMTP traffic must use HTTPS: implementations must validate the remote server's TLS certificate against a trusted certificate authority and reject connections with invalid, expired, or self-signed certificates.
 
 ### 7.2 Per-recipient secrets
 
@@ -386,55 +362,39 @@ This lets the Sender Server safely retry an `incoming` notification whenever it 
 
 ### 7.5 Client Authentication
 
-The `?action=send` endpoint requires authentication. A server must implement at least one of the two methods defined below; it may implement both. The `authentication` field in the `?action=version&type=send` response lists the methods supported by that server.
-
-#### Method `password`
-
-The client sends the password of the local user identified by the `from` field:
-
-```json
-{
-  "method": "password",
-  "password": "plaintext-password"
-}
-```
+`?action=send` requires token authentication; the server advertises its supported methods in the `authentication` field of the `?action=version&type=send` response.
 
 #### Method `token`
 
-A token consists of two parts: a public identifier (`id`) and a secret known only to the client and the server. The client signs the request using HMAC-SHA256 and includes the result in the `signature` field.
+A token has two parts: a public `id` and a secret known only to the client and the server. The client picks an algorithm from the server's `hashing` list, signs the request with HMAC, and submits the result in the `authentication` object of the message:
 
 ```json
 {
-  "method": "token",
+  "hash": "sha3-256",
   "id": "public-token-id",
-  "signature": "hmac-sha256-hex",
+  "method": "token",
+  "signature": "hmac-hex",
   "timestamp": 1709730000
 }
 ```
 
-**Signing procedure:** the client constructs the following compact JSON string (fields in alphabetical order, no extra whitespace) and computes `HMAC-SHA256(tokenSecret, signingString)`:
+**Token ownership:** the server must first verify that the token identified by `id` belongs to the user identified by the `from` field. If it does not, the server returns `401 Unauthorized` without verifying the signature.
+
+**Token lifecycle:** token creation and revocation are left to the implementation, which must support revocation and may enforce a maximum token lifetime.
+
+**Signing procedure:** the client constructs the following compact JSON (fields in alphabetical order, no extra whitespace) and computes `HMAC(tokenSecret, signingString)` with the chosen algorithm:
 
 ```
-{"message":<messageObject>,"timestamp":<timestamp>,"token":"<tokenId>"}
+{"message":<messageObject>,"timestamp":<timestamp>}
 ```
 
-Where `<messageObject>` is the compact JSON serialization of the message, constructed as follows:
-- All fields from the `data` part except `authentication`, in alphabetical key order.
-- An `attachments` array containing one object per attachment, each with two fields in alphabetical order: `{"content":"<base64-encoded bytes>","name":"<filename>"}`. Attachments are sorted by `name` in ascending lexicographic order.
-
-`<timestamp>` is the Unix timestamp integer and `<tokenId>` is the public token identifier. The resulting HMAC is encoded as a lowercase hexadecimal string.
-
-The Content-Type of each attachment is not included in the signature and is not specified by the sender. The Recipient Server determines the file type independently.
+`<messageObject>` is the compact JSON serialization of the message: all fields from the `data` part except `authentication`, in alphabetical key order, followed by an `attachments` array with one object per attachment — `{"content":"<base64url-encoded bytes>","name":"<filename>"}` — sorted by `name` ascending. The attachment Content-Type is not included in the signature; the Recipient Server determines file type independently. The HMAC digest is encoded as a lowercase hexadecimal string.
 
 **Timestamp validation:** the server rejects any request whose `timestamp` differs from the server's current time by more than 60 seconds.
 
-**Token ownership:** the server must verify that the token identified by `id` belongs to the local user identified by the `from` field. A valid signature from a token owned by a different user must be rejected with `401 Unauthorized`.
-
-**Token lifecycle:** token creation and revocation are left to the implementation. Implementations must support token revocation and may enforce a maximum token lifetime.
-
 ### 7.6 Message Size Limits
 
-Implementations must enforce a maximum size on incoming request bodies. Requests that exceed this limit must be rejected with `413 Content Too Large` before processing the body. The specific limit is left to the implementation and should be documented by the server operator.
+Implementations must enforce a maximum size on incoming request bodies, rejecting any request that exceeds it with `413 Content Too Large` before processing the body. The specific limit is left to the implementation and must be advertised via `messageSizeLimit` in the `?action=version` response; servers may temporarily block senders or clients that ignore it.
 
 This applies to both `?action=send` (local client submissions) and `?action=incoming` (notifications from remote Sender Servers). For `?action=send`, the effective limit may be enforced at the web server or runtime level (e.g. Apache `LimitRequestBody`, PHP `post_max_size`) before the WMTP script is reached; clients must treat any `413` response as a permanent rejection of that message.
 
@@ -445,13 +405,13 @@ Deploying a WMTP server may require just a free PHP hosting account. This low ba
 The protocol cannot fully solve this problem, but defines the following baseline:
 
 **Recipient Server obligations:**
-- Recipient Servers should implement rate limiting on `?action=incoming` requests. Both per-IP and per-domain rate limiting are recommended, as an attacker cycling through hosting providers may change them.
+- Recipient Servers should implement rate limiting on `?action=incoming` requests; per-IP and per-domain limits are both recommended, as an attacker cycling through hosting providers may change them.
 - When a rate limit is exceeded, the server must respond with `429 Too Many Requests`. The response should include a `Retry-After` header indicating when the sender may retry.
 
 **Sender Server obligations:**
-- A Sender Server that receives a `429` response must not retry before the time indicated in the `Retry-After` header. If the header is absent, the server must apply its standard retry policy (see section 3.1) and must not retry immediately.
+- A Sender Server that receives a `429` response must not retry before the time indicated in the `Retry-After` header; if the header is absent, it must apply its standard retry policy (see section 3.1) and must not retry immediately.
 
-More sophisticated countermeasures — shared blocklists, sender reputation systems, domain-level filtering — are outside the scope of this version and may be addressed in future extensions.
+More sophisticated countermeasures — shared blocklists, sender reputation systems, domain-level filtering — are outside the scope of this specification and may be addressed in future extensions.
 
 ### 7.8 HTTP Redirects
 
@@ -483,3 +443,43 @@ A redirect that violates any of these constraints is a delivery failure.
 ## Authors
 
 Stefano Balocco
+
+---
+
+## Changelog
+
+#### Version 1.3 — 2026-03-08
+
+- Removed password authentication; token is now the only supported method (Section 7.5)
+- Added algorithm negotiation: the server advertises supported hashing algorithms via the `hashing` field in `?action=version&type=send` (Section 6.1, Section 7.5)
+- Added `hash` field to the `authentication` object; recommended algorithms are `sha3-256` and `sha-512` (Section 7.5)
+- Simplified signing string to `{"message":<obj>,"timestamp":<ts>}` (Section 7.5)
+- Added `messageSizeLimit` field to the `?action=version` response (`type=receive` and `type=send`); senders and clients must check it before submitting and treat any message exceeding it as permanently undeliverable (Section 6.1, Section 7.6)
+- Clarified token ownership check must occur before signature verification (Section 7.5)
+- Servers may temporarily block senders or clients that ignore the advertised size limit (Section 7.6)
+
+#### Version 1.2 — 2026-03-07
+
+- Clarified that plain WMTP addresses in JSON bodies are transmitted without base64url encoding; only URL query parameters require encoding (Section 4, Section 6.2, Section 6.3)
+- Updated all examples to use `alice@www.example.org` as sender and `charlie@www.example.com` as recipient
+- Fixed deliver URL to use the Sender Server's address (`www.example.org`) (Section 6.3)
+- Added well-known metadata keys `reply`, `thread`, and `format` (Section 5.4)
+- Added HTTP Redirect policy: one hop, same registered domain, HTTPS only (Section 7.8)
+
+#### Version 1.1 — 2026-03-06
+
+- Replaced custom encodings with base64url (Section 4)
+- Replaced Protocol Buffers with multipart/form-data (Section 5)
+- Fixed BCC field semantics (Section 5.2)
+- Added attachment filename uniqueness constraint (Section 5.1)
+- Added Retry Policy (Section 3.1)
+- Added Client Authentication with `token` method and HMAC signing (Section 7.5)
+- Added TLS certificate validation requirement (Section 7.1)
+- Added Message Size Limits (Section 7.6)
+- Added Rate Limiting and Spam guidance (Section 7.7)
+- Added `type` parameter to `?action=version` to distinguish server-to-server and client-to-server contexts (Section 6.1)
+- Removed implementation-specific deployment section
+
+#### Version 1.0 — 2026-02-01
+
+Initial draft.
