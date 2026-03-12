@@ -1,8 +1,8 @@
 
 # RFC: Web Mail Transport Protocol (WMTP)
 
-**Version:** 1.3
-**Date:** 2026-03-08
+**Version:** 1.4
+**Date:** 2026-03-12
 
 ---
 
@@ -49,29 +49,35 @@ https://{server-base}/wmtp/
 
 When a server constructs the endpoint URL of another server (e.g. to call `?action=deliver`), it extracts `server-base` as the substring after `@` in the address, then appends `/wmtp/`.
 
+Both `localpart` and `server-base` are lowercase. A WMTP address must not contain uppercase letters, except in the reserved `SYSTEM` sender described in section 2.4.
+
 ### 2.2 Username syntax
 
 The `localpart` (username) must satisfy the following rules:
 
-- **Allowed characters:** ASCII letters (`a`–`z`, `A`–`Z`), digits (`0`–`9`), hyphen (`-`), underscore (`_`).
+- **Allowed characters:** ASCII lowercase letters (`a`–`z`), digits (`0`–`9`), hyphen (`-`), underscore (`_`), full stop (`.`).
 - **First and last character:** must be a letter or digit. A single-character username is valid.
-- **Case:** case insensitive; implementations must normalize usernames to lowercase on storage and comparison.
+- **Case:** usernames are lowercase; implementations must reject any username containing uppercase letters.
 
 Formal grammar:
 
 ```
 username     = name-char *( inner-char ) name-char / name-char
-name-char    = ALPHA / DIGIT
-inner-char   = name-char / "-" / "_"
+name-char    = %x61-7A / DIGIT          ; a–z
+inner-char   = name-char / "-" / "_" / "."
 ```
 
-**Valid examples:** `alice`, `bob42`, `first-last`, `a_b_c`, `x`
+**Valid examples:** `alice`, `bob42`, `first-last`, `a_b_c`, `first.last`, `x`
 
-**Invalid examples:** `-alice` (starts with hyphen), `alice-` (ends with hyphen), `ali ce` (space)
+**Invalid examples:** `-alice` (starts with hyphen), `alice-` (ends with hyphen), `ali ce` (space), `Alice` (uppercase)
 
 ### 2.3 Reserved characters
 
 The characters `+`, `/`, `\`, `=`, `|` are reserved for potential future use (e.g. `+` for subaddressing) and must not appear in usernames.
+
+### 2.4 Reserved addresses
+
+All system-generated messages (bounce notifications, for example) use `SYSTEM@{server-base}` as the mandatory sender. The address is synthetic: the server generates these messages internally and delivers them directly to local users, bypassing the normal delivery workflow; the uppercase form is unambiguous in an otherwise all-lowercase address space. No inbound network request may carry `SYSTEM` as sender or recipient, nor is `system` a valid localpart for any address.
 
 ---
 
@@ -103,7 +109,7 @@ If the delivery sequence fails (network error, `502` from the Recipient Server, 
 
 - The Sender Server must attempt delivery **at least twice per calendar day** for each recipient until either delivery succeeds or seven days have elapsed since the first attempt.
 - Implementations may retry more frequently or apply any scheduling strategy (e.g. exponential backoff, time-of-day heuristics), as long as the minimum of two attempts per day is met.
-- After seven days without successful delivery, the Sender Server must treat the message as undeliverable, notify the local sender with a bounce notification, and discard the queued message.
+- After seven days without successful delivery, the Sender Server must treat the message as undeliverable, send the local sender a bounce notification from `SYSTEM@{server-base}`, and discard the queued message.
 
 The seven-day retry window aligns with the deduplication log described in section 7.4, ensuring that a late successful delivery is never recorded as a duplicate.
 
@@ -195,6 +201,7 @@ Returns the protocol version and, when requested by a local client, the supporte
 
 ```json
 {
+  "attachments": true,
   "messageBodyFormats": ["multipart/mixed"],
   "messageSizeLimit": 10485760,
   "protocol": "1.0"
@@ -205,6 +212,7 @@ Returns the protocol version and, when requested by a local client, the supporte
 
 ```json
 {
+  "attachments": true,
   "authentication": ["token"],
   "hashing": ["sha3-256", "sha-512"],
   "messageBodyFormats": ["multipart/mixed"],
@@ -212,6 +220,8 @@ Returns the protocol version and, when requested by a local client, the supporte
   "protocol": "1.0"
 }
 ```
+
+The `attachments` field indicates whether the server accepts attachment parts in messages. Senders and clients must treat any message with attachments destined for a server that does not support them as permanently undeliverable.
 
 The optional `messageSizeLimit` field indicates the maximum request body size in bytes the server accepts; senders and clients must check this value before submitting a message and treat any message exceeding it as permanently undeliverable without attempting submission.
 
@@ -451,6 +461,15 @@ Stefano Balocco
 ---
 
 ## Changelog
+
+#### Version 1.4 — 2026-03-12
+
+- Added full stop (`.`) to the set of permitted username characters (Section 2.2)
+- Changed address case rule from case-insensitive normalization to all-lowercase; both `localpart` and `server-base` must be lowercase (Sections 2.1, 2.2)
+- Updated formal ABNF grammar to reflect lowercase-only `name-char` and the addition of `.` to `inner-char` (Section 2.2)
+- Added Section 2.4 defining `SYSTEM@{server-base}` as the mandatory sender for system-generated messages (including bounces) and reserving `system` as a localpart
+- Bounce notifications now explicitly use `SYSTEM@{server-base}` as the sender (Section 3.1)
+- Added `attachments` field to the `?action=version` response (`type=receive` and `type=send`); senders and clients must treat messages with attachments destined for a server that does not support them as permanently undeliverable (Section 6.1)
 
 #### Version 1.3 — 2026-03-08
 

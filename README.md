@@ -2,7 +2,7 @@
 
 WMTP treats email transport as a web-native capability rather than a specialized server role. If you can deploy a web application, you can deploy a WMTP endpoint — no dedicated mail daemon, no separate ports, no parallel infrastructure to operate.
 
-Messages transmitted using WMTP are called **wmail** (pronounced /ˈwiːmeɪl/, like "we-mail," where "we" stands for web). A wmail is a mail message transported natively over HTTPS according to the WMTP specification.
+Messages transmitted using WMTP are called **wmail** (pronounced /ˈwiːmeɪl/, like "we-mail", where "we" stands for web). A wmail is a mail message transported natively over HTTPS according to the WMTP specification.
 
 ## Purpose of This RFC
 
@@ -23,6 +23,10 @@ Because WMTP operates over HTTPS, it integrates directly with existing reverse p
 ### Deployability
 
 Anyone who can publish a web application can provision a WMTP mailbox. Shared hosting environments, VPS instances, container platforms, serverless HTTP runtimes, and free hosting providers all qualify. A functional WMTP server can be running in minutes. This removes the traditional constraints of mail server provisioning, DNS complexity, and provider lock-in.
+
+### Embedded Messaging Systems
+
+WMTP is designed to serve not only standalone mail servers but also internal messaging systems embedded in forums, social platforms, and similar applications. Many such systems have no native attachment support and no desire to store large binary files in their databases. The `attachments` capability flag in the `?action=version` response lets those implementations participate in the WMTP network without changing their data model or taking on storage costs they cannot absorb.
 
 ### Observability
 
