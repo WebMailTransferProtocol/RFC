@@ -1,7 +1,7 @@
 
 # RFC: Web Mail Transport Protocol (WMTP)
 
-**Version:** 1.4
+**Version:** 1.5
 **Date:** 2026-03-12
 
 ---
@@ -117,14 +117,18 @@ The seven-day retry window aligns with the deduplication log described in sectio
 
 ## 4. Encoding
 
-WMTP uses **base64url** (RFC 4648 §5) to encode values that contain binary data or characters that are unsafe in URLs. The base64url alphabet uses `A`–`Z`, `a`–`z`, `0`–`9`, `-`, `_`, with padding characters (`=`) omitted.
+WMTP uses two encoding schemes for URL query parameters.
+
+**Percent-encoding** (RFC 3986) is used for WMTP addresses passed as query parameters. Only characters that are unsafe or reserved in URLs are encoded; the rest appear as-is.
+
+**Example:** `charlie@www.example.com` → `charlie%40www.example.com`
+
+**Base64url** (RFC 4648 §5) is used for values that contain arbitrary binary data, such as per-recipient secrets. The base64url alphabet uses `A`–`Z`, `a`–`z`, `0`–`9`, `-`, `_`, with padding characters (`=`) omitted.
 
 - **Encode:** standard base64 with URL-safe alphabet, omitting trailing `=` padding.
 - **Decode:** standard base64url decode; implementations must reject any input containing `+`, `/`, or `=`.
 
-**Example:** `charlie@www.example.com` (recipient address in a URL query parameter) → `Y2hhcmxpZUB3d3cuZXhhbXBsZS5jb20`
-
-Plain ASCII strings such as UUIDs and WMTP addresses in JSON bodies are transmitted without encoding. This specification identifies which fields require base64url encoding in each endpoint.
+Plain ASCII strings such as UUIDs and WMTP addresses in JSON bodies are transmitted without encoding. This specification identifies which fields require encoding in each endpoint.
 
 ---
 
@@ -284,14 +288,14 @@ Requests the message from the Sender Server. The Recipient Server calls this end
 |---|---|
 | `messageId` | Message identifier (as provided in the `incoming` notification) |
 | `secret` | Base64url-encoded per-recipient secret (as provided in the `incoming` notification) |
-| `recipient` | Base64url-encoded recipient address (as provided in the `incoming` notification) |
+| `recipient` | Percent-encoded recipient address (as provided in the `incoming` notification) |
 
-`messageId` is a UUID and contains only URL-safe characters; no encoding is required. `recipient` may contain `@` and `/` and must be base64url-encoded. `secret` contains arbitrary bytes and must be base64url-encoded.
+`messageId` is a UUID and contains only URL-safe characters; no encoding is required. `recipient` is a WMTP address and must be percent-encoded. `secret` contains arbitrary bytes and must be base64url-encoded.
 
 **Example request:**
 
 ```
-GET https://www.example.org/wmtp/?action=deliver&messageId=1ef5b3e2-1234-6abc-9def-abcdef012345&secret=YWJjZGVmZ2hpamtsbW5vcA&recipient=Y2hhcmxpZUB3d3cuZXhhbXBsZS5jb20
+GET https://www.example.org/wmtp/?action=deliver&messageId=1ef5b3e2-1234-6abc-9def-abcdef012345&secret=YWJjZGVmZ2hpamtsbW5vcA&recipient=charlie%40www.example.com
 ```
 
 **Response:**
@@ -461,6 +465,10 @@ Stefano Balocco
 ---
 
 ## Changelog
+
+#### Version 1.5 — 2026-03-12
+
+- Changed `recipient` query parameter encoding from base64url to percent-encoding (RFC 3986); WMTP addresses only require `@` and `/` to be escaped, making the encoded form human-readable (Sections 4, 6.3)
 
 #### Version 1.4 — 2026-03-12
 
