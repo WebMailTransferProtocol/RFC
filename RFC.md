@@ -408,7 +408,7 @@ A token has two parts: a public `id` and a secret known only to the client and t
 {"message":<messageObject>,"timestamp":<timestamp>}
 ```
 
-`<messageObject>` is the compact JSON serialization of the message: all fields from the `data` part except `authentication`, in alphabetical key order, followed by an `attachments` array with one object per attachment — `{"content":"<base64url-encoded bytes>","name":"<filename>"}` — sorted by `name` ascending. The attachment Content-Type is not included in the signature; the Recipient Server determines file type independently. The HMAC digest is encoded as a lowercase hexadecimal string.
+`<messageObject>` is the compact JSON serialization of the message: all fields from the `data` part except `authentication`, in alphabetical key order, followed by an `attachments` array with one object per attachment — `{"hash":"<hex-encoded hash of raw bytes>","name":"<filename>"}` — sorted by `name` ascending. Each attachment hash is computed with the same algorithm specified in the `authentication` object's `hash` field. The attachment Content-Type is not included in the signature; the Recipient Server determines file type independently. The HMAC digest is encoded as a lowercase hexadecimal string.
 
 **Timestamp validation:** the server rejects any request whose `timestamp` differs from the server's current time by more than 60 seconds.
 
@@ -472,6 +472,7 @@ Stefano Balocco
 
 - Renamed `protocol` field to `protocols` (array of version strings); servers advertise all supported versions and the Sender Server selects the highest common version (Sections 3, 6.1)
 - Added version compatibility rules: `major.minor` numbering, forward compatibility via ignored unknown fields (Section 6.1)
+- Changed attachment signing to use hex-encoded hashes of raw bytes instead of base64url-encoded file content; reduces memory usage for large attachments (Section 7.5)
 - Fixed ABNF grammar for `username` to correctly allow single-character usernames (Section 2.2)
 
 #### Version 1.5 — 2026-03-12
