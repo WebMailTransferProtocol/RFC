@@ -1,8 +1,8 @@
 
 # RFC: Web Mail Transport Protocol (WMTP)
 
-**Version:** 1.5
-**Date:** 2026-03-12
+**Version:** 1.6
+**Date:** 2026-03-14
 
 ---
 
@@ -62,7 +62,7 @@ The `localpart` (username) must satisfy the following rules:
 Formal grammar:
 
 ```
-username     = name-char *( inner-char ) name-char / name-char
+username     = name-char *( inner-char name-char )
 name-char    = %x61-7A / DIGIT          ; a–z
 inner-char   = name-char / "-" / "_" / "."
 ```
@@ -87,7 +87,7 @@ All system-generated messages (bounce notifications, for example) use `SYSTEM@{s
 Sender Server                          Recipient Server
       |                                       |
       |-- GET ?action=version --------------->|  (1) check protocol version
-      |<-- 200 { protocol, authentication } --|
+      |<-- 200 { protocols, authentication } --|
       |                                       |
       |-- POST ?action=incoming ------------->|  (2) notify: message ready
       |   body: { from, recipient,            |
@@ -99,7 +99,7 @@ Sender Server                          Recipient Server
 
 The Sender Server must hold the message before executing this sequence. Local users submit messages via `?action=send` (section 6.4).
 
-1. The Sender Server calls `?action=version` on the Recipient Server to confirm protocol compatibility.
+1. The Sender Server calls `?action=version` on the Recipient Server to check protocol compatibility and select the highest common version.
 2. The Sender Server calls `?action=incoming` on the Recipient Server to notify it that a message is ready. The notification includes the encoded sender address, recipient address, message ID, and a per-recipient secret.
 3. Within the same `incoming` request, the Recipient Server validates the recipient, calls `?action=deliver` on the Sender Server to fetch the message, and stores it locally. The `200 OK` response to `incoming` is sent only after the message is successfully stored. If the fetch fails, the Recipient returns `502`.
 
@@ -199,7 +199,9 @@ All endpoints live at the same URL (the WMTP endpoint). The action is selected v
 
 ### 6.1 `GET ?action=version`
 
-Returns the protocol version and, when requested by a local client, the supported authentication methods and hashing algorithms. The optional `type` query parameter specifies the context: `receive` (default) for server-to-server delivery, `send` for local client submission.
+Returns the supported protocol versions and, when requested by a local client, the supported authentication methods and hashing algorithms. The optional `type` query parameter specifies the context: `receive` (default) for server-to-server delivery, `send` for local client submission.
+
+The `protocols` field is an array of version strings the server supports, ordered from most recent to oldest (e.g. `["2.0", "1.0"]`). Each version string uses `major.minor` numbering. The Sender Server must select the highest version present in both its own list and the Recipient Server's list. If no common version exists, the message is permanently undeliverable. Implementations must ignore unrecognized fields in all JSON objects to preserve forward compatibility within the same major version.
 
 **Response body (JSON) — `type=receive` (default):**
 
@@ -208,7 +210,7 @@ Returns the protocol version and, when requested by a local client, the supporte
   "attachments": true,
   "messageBodyFormats": ["multipart/mixed"],
   "messageSizeLimit": 10485760,
-  "protocol": "1.0"
+  "protocols": ["1.0"]
 }
 ```
 
@@ -221,7 +223,7 @@ Returns the protocol version and, when requested by a local client, the supporte
   "hashing": ["sha3-256", "sha-512"],
   "messageBodyFormats": ["multipart/mixed"],
   "messageSizeLimit": 10485760,
-  "protocol": "1.0"
+  "protocols": ["1.0"]
 }
 ```
 
@@ -465,6 +467,12 @@ Stefano Balocco
 ---
 
 ## Changelog
+
+#### Version 1.6 — 2026-03-14
+
+- Renamed `protocol` field to `protocols` (array of version strings); servers advertise all supported versions and the Sender Server selects the highest common version (Sections 3, 6.1)
+- Added version compatibility rules: `major.minor` numbering, forward compatibility via ignored unknown fields (Section 6.1)
+- Fixed ABNF grammar for `username` to correctly allow single-character usernames (Section 2.2)
 
 #### Version 1.5 — 2026-03-12
 
