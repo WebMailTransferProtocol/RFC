@@ -1,8 +1,8 @@
 
 # RFC: Web Mail Transport Protocol (WMTP)
 
-**Version:** 1.6
-**Date:** 2026-03-14
+**Version:** 1.7
+**Date:** 2026-04-07
 
 ---
 
@@ -49,7 +49,7 @@ https://{server-base}/wmtp/
 
 When a server constructs the endpoint URL of another server (e.g. to call `?action=deliver`), it extracts `server-base` as the substring after `@` in the address, then appends `/wmtp/`.
 
-Both `localpart` and `server-base` are lowercase. A WMTP address must not contain uppercase letters, except in the reserved `SYSTEM` sender described in section 2.4.
+The `localpart` is lowercase. Within `server-base`, the hostname is lowercase; the path portion is case-sensitive. `server-base` must not contain a fragment identifier (`#`) or a query string (`?`), because the WMTP endpoint URL is formed by appending `/wmtp/` to it. The reserved `SYSTEM` sender described in section 2.4 is the only address that may contain uppercase letters in the `localpart`.
 
 ### 2.2 Username syntax
 
@@ -467,6 +467,11 @@ Stefano Balocco
 ---
 
 ## Changelog
+
+#### Version 1.7 — 2026-04-07
+
+- Changed `server-base` case rule: hostname is lowercase, path portion is case-sensitive (Section 2.1)
+- Added constraint: `server-base` must not contain a fragment identifier or query string (Section 2.1)
 
 #### Version 1.6 — 2026-03-14
 
